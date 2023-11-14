@@ -4,8 +4,9 @@ pub mod user;
 use std::env;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     middleware,
+    response::Redirect,
     routing::get,
     Extension, Json, Router,
 };
@@ -14,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    db::item::{get_item_icon, get_price_object},
     error::{Error, Result},
     guard::guard,
     jwt::User,
@@ -25,6 +27,7 @@ pub fn routes() -> Router<AppState> {
         .route("/inventory", get(get_inventory))
         .route("/prices", get(get_prices))
         .route("/currencies", get(get_currencies))
+        .route("/icon/:market_hash_name", get(get_icon))
         .nest("/investment", investment::routes())
         .nest("/user", user::routes())
         .route_layer(middleware::from_fn(guard))
@@ -162,65 +165,16 @@ async fn get_prices(
     Query(query): Query<ItemData>,
     State(mut state): State<AppState>,
 ) -> Result<Json<Prices>> {
-    let cached_prices: Option<String> = state
-        .redis
-        .json_get(
-            "csgotrader_prices",
-            format!("$[\"{}\"]", query.market_hash_name),
-        )
-        .map_err(|_| Error::RedisGetFail)?;
+    let prices = get_price_object(&mut state.redis, &query.market_hash_name)
+        .await?
+        .ok_or(Error::PricesFetchFail)?;
 
-    if cached_prices.is_none() {
-        let client = reqwest::Client::builder()
-            .gzip(true)
-            .build()
-            .map_err(|_| Error::HttpClientCreationFail)?;
+    let prices_value: Value = serde_json::from_str(&prices).map_err(|_| Error::PricesParseFail)?;
 
-        let new_prices: Value = client
-            .get("https://prices.csgotrader.app/latest/prices_v6.json")
-            .send()
-            .await
-            .map_err(|_| Error::PricesFetchFail)?
-            .json()
-            .await
-            .map_err(|_| Error::PricesParseFail)?;
+    let prices = prices_value.get(0).ok_or(Error::PricesFetchFail)?;
 
-        state
-            .redis
-            .json_set("csgotrader_prices", ".", &new_prices)
-            .map_err(|_| Error::RedisSetFail)?;
-
-        state
-            .redis
-            .expire("csgotrader_prices", 3600 * 8)
-            .map_err(|_| Error::RedisExpireFail)?;
-
-        let new_prices: Option<String> = state
-            .redis
-            .json_get(
-                "csgotrader_prices",
-                format!("$[\"{}\"]", query.market_hash_name),
-            )
-            .map_err(|_| Error::RedisGetFail)?;
-
-        let new_prices = serde_json::from_str(
-            &new_prices
-                .ok_or(Error::RedisGetFail)?
-                .replace("[", "")
-                .replace("]", ""),
-        )
-        .map_err(|_| Error::PricesParseFail)?;
-
-        return Ok(Json(new_prices));
-    }
-
-    let prices: Prices = serde_json::from_str(
-        &cached_prices
-            .ok_or(Error::RedisGetFail)?
-            .replace("[", "")
-            .replace("]", ""),
-    )
-    .map_err(|_| Error::PricesParseFail)?;
+    let prices: Prices =
+        serde_json::from_value(prices.clone()).map_err(|_| Error::PricesParseFail)?;
 
     Ok(Json(prices))
 }
@@ -270,4 +224,15 @@ async fn get_currencies(State(mut state): State<AppState>) -> Result<Json<Curren
         serde_json::from_str(&cached_rates.unwrap()).map_err(|_| Error::RatesParseFail)?;
 
     Ok(Json(rates))
+}
+
+async fn get_icon(
+    Path(market_hash_name): Path<String>,
+    State(mut state): State<AppState>,
+) -> Result<Redirect> {
+    let icon_url = get_item_icon(&mut state.redis, &market_hash_name)
+        .await?
+        .ok_or(Error::ItemMissingImage)?;
+
+    Ok(Redirect::to(&icon_url))
 }

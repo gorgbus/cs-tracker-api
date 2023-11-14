@@ -8,6 +8,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub enum Error {
     ProxyCreationFail,
     HttpClientCreationFail,
+    UriCreateFail,
 
     InventoryFetchFail,
     InventoryParseFail,
@@ -17,6 +18,11 @@ pub enum Error {
 
     RatesFetchFail,
     RatesParseFail,
+
+    ItemsFetchFail,
+    ItemsParseFail,
+    ItemMissingImage,
+    InvalidHashName,
 
     SteamMissingId,
     SteamMissingAsset,

@@ -28,7 +28,6 @@ pub struct CustomInvestment {
     inv_id: i32,
     steam_id: String,
     item: String,
-    icon_url: String,
     collection: i32,
     col_name: String,
     cost: Decimal,
@@ -70,9 +69,8 @@ pub async fn create_investment(
 
 pub async fn get_investment(pool: &PgPool, inv_id: i32) -> Result<CustomInvestment> {
     let sql = r"
-        select inv.*, it.icon_url, c.name as col_name
-        from (investments inv inner join items it on inv.item = it.market_hash_name)
-        inner join collections c on c.col_id = inv.collection
+        select inv.*, c.name as col_name
+        from investments inv inner join collections c on c.col_id = inv.collection
         where inv.inv_id = $1
     ";
 
@@ -92,9 +90,8 @@ pub async fn get_investment(pool: &PgPool, inv_id: i32) -> Result<CustomInvestme
 
 pub async fn get_investments(pool: &PgPool, steam_id: String) -> Result<Vec<CustomInvestment>> {
     let sql = r"
-        select inv.*, it.icon_url, c.name as col_name
-        from (investments inv inner join items it on inv.item = it.market_hash_name)
-        inner join collections c on c.col_id = inv.collection
+        select inv.*, c.name as col_name
+        from investments inv inner join collections c on c.col_id = inv.collection
         where inv.steam_id = $1
     ";
 
@@ -121,9 +118,8 @@ pub async fn get_investments_by_coll(
     col_id: i32,
 ) -> Result<Vec<CustomInvestment>> {
     let sql = r"
-        select inv.*, it.icon_url, c.name as col_name
-        from (investments inv inner join items it on inv.item = it.market_hash_name)
-        inner join collections c on c.col_id = inv.collection
+        select inv.*, c.name as col_name
+        from investments inv inner join collections c on c.col_id = inv.collection
         where inv.steam_id = $1 and c.col_id = $2
     ";
 

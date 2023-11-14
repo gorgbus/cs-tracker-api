@@ -1,12 +1,9 @@
-use std::env;
-
 use axum::{
     extract::{Path, Query, State},
     routing::{delete, get, post},
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{
     db::{
@@ -14,7 +11,7 @@ use crate::{
             create_investment, drop_investment, get_investments, get_investments_by_coll,
             Currencies, CustomInvestment,
         },
-        item::{create_item, item_exists},
+        item::item_exists,
     },
     error::{Error, Result},
     jwt::User,
@@ -41,55 +38,13 @@ struct InvestmentReq {
 }
 
 async fn new_investment(
-    State(state): State<AppState>,
+    State(mut state): State<AppState>,
     Extension(user): Extension<User>,
     Json(body): Json<InvestmentReq>,
 ) -> Result<Json<CustomInvestment>> {
-    if !item_exists(&state.pg, &body.market_hash_name).await? {
-        let proxy = reqwest::Proxy::all(env::var("PROXY_URL").unwrap())
-            .map_err(|_| Error::ProxyCreationFail)?;
-
-        let client = reqwest::Client::builder()
-            .proxy(proxy)
-            .build()
-            .map_err(|_| Error::HttpClientCreationFail)?;
-
-        let steam_market_url = format!(
-            "https://steamcommunity.com/market/listings/730/{}/render?currency=2&format=json",
-            body.market_hash_name
-        );
-
-        let item_info: Value = client
-            .get(steam_market_url)
-            .send()
-            .await
-            .map_err(|_| Error::PricesFetchFail)?
-            .json()
-            .await
-            .map_err(|_| Error::PricesParseFail)?;
-
-        let assets = item_info
-            .get("assets")
-            .ok_or(Error::SteamMissingAsset)?
-            .get("730")
-            .ok_or(Error::SteamMissingAsset)?
-            .get("2")
-            .ok_or(Error::SteamMissingAsset)?
-            .as_object()
-            .ok_or(Error::SteamMissingAsset)?;
-
-        let mut icon_url = None;
-
-        for (_, ctx) in assets.iter() {
-            icon_url = ctx
-                .get("icon_url")
-                .ok_or(Error::SteamMissingAsset)?
-                .as_str();
-        }
-
-        let icon_url = icon_url.ok_or(Error::SteamMissingAsset)?;
-
-        create_item(&state.pg, &body.market_hash_name, icon_url).await?;
+    match item_exists(&mut state.redis, &body.market_hash_name).await? {
+        None => return Err(Error::InvalidHashName),
+        _ => (),
     }
 
     Ok(Json(
