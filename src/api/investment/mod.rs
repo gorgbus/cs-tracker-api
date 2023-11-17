@@ -9,7 +9,7 @@ use crate::{
     db::{
         investment::{
             create_investment, drop_investment, get_investments, get_investments_by_coll,
-            Currencies, CustomInvestment,
+            update_investment, Currencies, CustomInvestment,
         },
         item::item_exists,
     },
@@ -25,6 +25,7 @@ pub fn routes() -> Router<AppState> {
         .route("/create", post(new_investment))
         .route("/all", get(all_investments))
         .route("/:inv_id", delete(delete_investment))
+        .route("/:inv_id", post(edit_investment))
         .nest("/collection", collection::routes())
 }
 
@@ -50,7 +51,7 @@ async fn new_investment(
     Ok(Json(
         create_investment(
             &state.pg,
-            user.steam.id.ok_or(Error::SteamMissingId)?,
+            user.steam_id()?,
             &body.market_hash_name,
             body.col_id,
             body.cost,
@@ -77,15 +78,8 @@ async fn all_investments(
     Extension(user): Extension<User>,
 ) -> Result<Json<Investments>> {
     let investments = match query.col_id {
-        Some(col_id) => {
-            get_investments_by_coll(
-                &state.pg,
-                user.steam.id.ok_or(Error::SteamMissingId)?,
-                col_id,
-            )
-            .await?
-        }
-        _ => get_investments(&state.pg, user.steam.id.ok_or(Error::SteamMissingId)?).await?,
+        Some(col_id) => get_investments_by_coll(&state.pg, user.steam_id()?, col_id).await?,
+        _ => get_investments(&state.pg, user.steam_id()?).await?,
     };
 
     Ok(Json(Investments { investments }))
@@ -96,12 +90,24 @@ async fn delete_investment(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<()> {
-    drop_investment(
-        &state.pg,
-        user.steam.id.ok_or(Error::SteamMissingId)?,
-        inv_id,
-    )
-    .await?;
+    drop_investment(&state.pg, user.steam_id()?, inv_id).await
+}
 
-    Ok(())
+#[derive(Deserialize)]
+pub struct EditInvestmentReq {
+    pub col_id: i32,
+    pub amount: i32,
+    pub cost: f32,
+    pub currency: Currencies,
+}
+
+async fn edit_investment(
+    Path(inv_id): Path<i32>,
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Json(body): Json<EditInvestmentReq>,
+) -> Result<Json<CustomInvestment>> {
+    Ok(Json(
+        update_investment(&state.pg, user.steam_id()?, inv_id, body).await?,
+    ))
 }

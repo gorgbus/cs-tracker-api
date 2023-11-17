@@ -65,7 +65,7 @@ async fn get_inventory(
         .build()
         .map_err(|_| Error::HttpClientCreationFail)?;
 
-    let steam_id = user.steam.id.ok_or(Error::SteamMissingId)?;
+    let steam_id = user.steam_id()?;
 
     let steam_inventory_endpoint =
         format!("https://steamcommunity.com/inventory/{steam_id}/730/2?l=english&count=1000");

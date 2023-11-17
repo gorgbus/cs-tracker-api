@@ -35,6 +35,7 @@ pub enum Error {
     PgFetchFail,
     PgInsertFail,
     PgDeleteFail,
+    PgUpdateFail,
 
     JwtInvalidToken,
 

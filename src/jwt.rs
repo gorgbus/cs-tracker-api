@@ -26,14 +26,16 @@ struct Claims {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct User {
     pub user_id: i32,
-    pub discord: Account,
     pub steam: Account,
-    pub admin: bool,
+}
+
+impl User {
+    pub fn steam_id(self) -> Result<String> {
+        self.steam.id.ok_or(Error::SteamMissingId)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Account {
     pub id: Option<String>,
-    pub avatar: Option<String>,
-    pub username: Option<String>,
 }

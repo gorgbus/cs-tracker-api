@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{types::Decimal, FromRow, PgPool, Type};
 
-use crate::error::{Error, Result};
+use crate::{
+    api::investment::EditInvestmentReq,
+    error::{Error, Result},
+};
 
 #[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
 struct Investment {
@@ -93,6 +96,7 @@ pub async fn get_investments(pool: &PgPool, steam_id: String) -> Result<Vec<Cust
         select inv.*, c.name as col_name
         from investments inv inner join collections c on c.col_id = inv.collection
         where inv.steam_id = $1
+        order by inv.inv_id asc
     ";
 
     let invests: Vec<CustomInvestment> = sqlx::query_as(sql)
@@ -121,6 +125,7 @@ pub async fn get_investments_by_coll(
         select inv.*, c.name as col_name
         from investments inv inner join collections c on c.col_id = inv.collection
         where inv.steam_id = $1 and c.col_id = $2
+        order by inv.inv_id asc
     ";
 
     let invests: Vec<CustomInvestment> = sqlx::query_as(sql)
@@ -155,4 +160,30 @@ pub async fn drop_investment(pool: &PgPool, steam_id: String, inv_id: i32) -> Re
         .map_err(|_| Error::PgDeleteFail)?;
 
     Ok(())
+}
+
+pub async fn update_investment(
+    pool: &PgPool,
+    steam_id: String,
+    inv_id: i32,
+    data: EditInvestmentReq,
+) -> Result<CustomInvestment> {
+    let sql = r"
+        update investments
+        set collection = $1, amount = $2, cost = $3, currency = $4
+        where steam_id = $5 and inv_id = $6
+    ";
+
+    sqlx::query(sql)
+        .bind(data.col_id)
+        .bind(data.amount)
+        .bind(data.cost)
+        .bind(data.currency)
+        .bind(steam_id)
+        .bind(inv_id)
+        .execute(pool)
+        .await
+        .map_err(|_| Error::PgUpdateFail)?;
+
+    get_investment(pool, inv_id).await
 }

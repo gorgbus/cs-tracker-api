@@ -32,6 +32,7 @@ pub async fn get_collections(pool: &PgPool, steam_id: String) -> Result<Vec<Coll
     let sql = r"
         select * from collections
         where steam_id = $1
+        order by col_id asc
     ";
 
     sqlx::query_as(sql)
@@ -55,4 +56,26 @@ pub async fn drop_collection(pool: &PgPool, steam_id: String, col_id: i32) -> Re
         .map_err(|_| Error::PgDeleteFail)?;
 
     Ok(())
+}
+
+pub async fn update_collection(
+    pool: &PgPool,
+    steam_id: String,
+    col_id: i32,
+    name: String,
+) -> Result<Collection> {
+    let sql = r"
+        update collections
+        set name = $1
+        where steam_id = $2 and col_id = $3
+        returning *
+    ";
+
+    sqlx::query_as(sql)
+        .bind(name)
+        .bind(steam_id)
+        .bind(col_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|_| Error::PgUpdateFail)
 }
