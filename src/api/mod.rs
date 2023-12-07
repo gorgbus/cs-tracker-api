@@ -165,16 +165,19 @@ async fn get_prices(
     Query(query): Query<ItemData>,
     State(mut state): State<AppState>,
 ) -> Result<Json<Prices>> {
-    let prices = get_price_object(&mut state.redis, &query.market_hash_name)
+    let prices = get_price_object(&mut state, &query.market_hash_name)
         .await?
         .ok_or(Error::PricesFetchFail)?;
 
-    let prices_value: Value = serde_json::from_str(&prices).map_err(|_| Error::PricesParseFail)?;
+    let mut prices_value: Value =
+        serde_json::from_str(&prices).map_err(|_| Error::PricesParseFail)?;
 
-    let prices = prices_value.get(0).ok_or(Error::PricesFetchFail)?;
+    let prices = prices_value
+        .get_mut(0)
+        .ok_or(Error::PricesFetchFail)?
+        .take();
 
-    let prices: Prices =
-        serde_json::from_value(prices.clone()).map_err(|_| Error::PricesParseFail)?;
+    let prices: Prices = serde_json::from_value(prices).map_err(|_| Error::PricesParseFail)?;
 
     Ok(Json(prices))
 }

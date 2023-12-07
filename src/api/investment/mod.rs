@@ -11,7 +11,7 @@ use crate::{
             create_investment, drop_investment, get_investments, get_investments_by_coll,
             update_investment, Currencies, CustomInvestment,
         },
-        item::item_exists,
+        item::{item_exists, suggest_items, Item},
     },
     error::{Error, Result},
     jwt::User,
@@ -24,6 +24,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/create", post(new_investment))
         .route("/all", get(all_investments))
+        .route("/suggestion", get(get_suggestion))
         .route("/:inv_id", delete(delete_investment))
         .route("/:inv_id", post(edit_investment))
         .nest("/collection", collection::routes())
@@ -43,7 +44,7 @@ async fn new_investment(
     Extension(user): Extension<User>,
     Json(body): Json<InvestmentReq>,
 ) -> Result<Json<CustomInvestment>> {
-    match item_exists(&mut state.redis, &body.market_hash_name).await? {
+    match item_exists(&mut state, &body.market_hash_name).await? {
         None => return Err(Error::InvalidHashName),
         _ => (),
     }
@@ -110,4 +111,23 @@ async fn edit_investment(
     Ok(Json(
         update_investment(&state.pg, user.steam_id()?, inv_id, body).await?,
     ))
+}
+
+#[derive(Deserialize)]
+struct SuggestionReq {
+    q: String,
+}
+
+#[derive(Serialize)]
+struct Suggestions {
+    suggestions: Vec<Item>,
+}
+
+async fn get_suggestion(
+    Query(query): Query<SuggestionReq>,
+    State(state): State<AppState>,
+) -> Result<Json<Suggestions>> {
+    Ok(Json(Suggestions {
+        suggestions: suggest_items(&state.pg, query.q).await?,
+    }))
 }
