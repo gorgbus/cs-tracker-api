@@ -140,13 +140,6 @@ pub struct Item {
 }
 
 pub async fn suggest_items(sqlite: &sqlx::PgPool, item_name: String) -> Result<Vec<Item>> {
-    // let sql = r"
-    //     select * from items
-    //     where market_hash_name % $1 and to_tsvector('english', market_hash_name) @@ to_tsquery('english', $1)
-    //     order by market_hash_name
-    //     limit 5
-    // ";
-
     let sql = r"
         with search as (
             select to_tsquery(string_agg(lexeme || ':*', ' & ' order by positions)) as query
@@ -174,14 +167,16 @@ async fn get_item_object(
     market_hash_name: &str,
 ) -> Result<Option<String>> {
     let key = format!("cs_{item_type}");
-    let mut path = format!("$.[?@.name=='{market_hash_name}']");
+    let mut path = format!("$.[?@.name==\"{market_hash_name}\"]");
 
     if item_type == "skins" {
         match market_hash_name.rfind("(") {
             Some(pos) => {
                 path = format!(
-                    "$.[?@.name=='{}']",
-                    &market_hash_name[..pos - 1].replace("StatTrak™ ", "")
+                    "$.[?@.name==\"{}\"]",
+                    &market_hash_name[..pos - 1]
+                        .replace("StatTrak™ ", "")
+                        .replace("Souvenir ", "")
                 );
             }
             _ => (),
