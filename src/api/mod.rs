@@ -12,10 +12,9 @@ use axum::{
 };
 use redis::{Commands, JsonCommands};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::{
-    db::item::{get_item_icon, get_price_object},
+    db::item::{get_item_icon, get_item_prices},
     error::{Error, Result},
     guard::guard,
     jwt::User,
@@ -41,16 +40,20 @@ struct Inventory {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Description {
-    icon_url: String,
-    name: String,
     market_hash_name: String,
     marketable: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct CustomInventory {
-    items: Vec<Description>,
-    total_inventory_count: i32,
+    items: Vec<InventoryItem>,
+    total_inventory_count: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct InventoryItem {
+    market_hash_name: String,
+    prices: Prices,
 }
 
 async fn get_inventory(
@@ -90,21 +93,25 @@ async fn get_inventory(
         let items = new_inventory
             .descriptions
             .into_iter()
-            .filter(|desc| desc.marketable == 1)
-            .collect();
+            .filter(|desc| desc.marketable == 1);
+
+        let mut new_items = vec![];
+
+        for item in items.into_iter() {
+            new_items.push(InventoryItem {
+                prices: get_item_prices(&mut state, &item.market_hash_name).await?,
+                market_hash_name: item.market_hash_name,
+            });
+        }
 
         let custom_inventory = CustomInventory {
-            items,
-            total_inventory_count: new_inventory.total_inventory_count,
+            total_inventory_count: new_items.iter().count(),
+            items: new_items,
         };
 
         state
             .redis
-            .json_set(
-                &key,
-                ".",
-                &serde_json::to_string(&custom_inventory).map_err(|_| Error::InventoryParseFail)?,
-            )
+            .json_set(&key, ".", &custom_inventory)
             .map_err(|_| Error::RedisSetFail)?;
 
         state
@@ -115,11 +122,8 @@ async fn get_inventory(
         return Ok(Json(custom_inventory));
     }
 
-    let cached_inventory = cached_inventory.unwrap().replace("\\", "");
-
     let inventory: CustomInventory =
-        serde_json::from_str(&cached_inventory[1..cached_inventory.len() - 1])
-            .map_err(|_| Error::InventoryParseFail)?;
+        serde_json::from_str(&cached_inventory.unwrap()).map_err(|_| Error::InventoryParseFail)?;
 
     Ok(Json(inventory))
 }
@@ -129,57 +133,45 @@ struct ItemData {
     market_hash_name: String,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SteamPrices {
-    last_24h: Option<f32>,
-    last_7d: Option<f32>,
-    last_30d: Option<f32>,
-    last_90d: Option<f32>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SteamPrices {
+    pub last_24h: Option<f32>,
+    pub last_7d: Option<f32>,
+    pub last_30d: Option<f32>,
+    pub last_90d: Option<f32>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct SkinportPrices {
-    suggested_price: Option<f32>,
-    starting_at: Option<f32>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct SkinportPrices {
+    pub suggested_price: Option<f32>,
+    pub starting_at: Option<f32>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct Price {
-    price: Option<f32>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Price {
+    pub price: Option<f32>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct BuffPrices {
-    starting_at: Option<Price>,
-    highest_order: Option<Price>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BuffPrices {
+    pub starting_at: Option<Price>,
+    pub highest_order: Option<Price>,
 }
 
-#[derive(Serialize, Deserialize)]
-struct Prices {
-    steam: Option<SteamPrices>,
-    skinport: Option<SkinportPrices>,
-    buff163: Option<BuffPrices>,
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Prices {
+    pub steam: Option<SteamPrices>,
+    pub skinport: Option<SkinportPrices>,
+    pub buff163: Option<BuffPrices>,
 }
 
 async fn get_prices(
     Query(query): Query<ItemData>,
     State(mut state): State<AppState>,
 ) -> Result<Json<Prices>> {
-    let prices = get_price_object(&mut state, &query.market_hash_name)
-        .await?
-        .ok_or(Error::PricesFetchFail)?;
-
-    let mut prices_value: Value =
-        serde_json::from_str(&prices).map_err(|_| Error::PricesParseFail)?;
-
-    let prices = prices_value
-        .get_mut(0)
-        .ok_or(Error::PricesFetchFail)?
-        .take();
-
-    let prices: Prices = serde_json::from_value(prices).map_err(|_| Error::PricesParseFail)?;
-
-    Ok(Json(prices))
+    Ok(Json(
+        get_item_prices(&mut state, &query.market_hash_name).await?,
+    ))
 }
 
 #[derive(Deserialize, Serialize)]

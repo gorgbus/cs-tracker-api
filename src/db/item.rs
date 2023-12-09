@@ -4,6 +4,7 @@ use serde_json::Value;
 use sqlx::{prelude::FromRow, Postgres, QueryBuilder};
 
 use crate::{
+    api::Prices,
     error::{Error, Result},
     state::AppState,
 };
@@ -12,7 +13,15 @@ pub async fn get_item_icon(
     redis: &mut redis::Client,
     market_hash_name: &str,
 ) -> Result<Option<String>> {
-    let item_types = ["skins", "stickers", "crates", "agents", "patches"];
+    let item_types = [
+        "skins",
+        "stickers",
+        "crates",
+        "agents",
+        "patches",
+        "graffiti",
+        "music_kits",
+    ];
 
     for item_type in item_types.iter() {
         match get_icon(redis, item_type, market_hash_name).await? {
@@ -66,10 +75,23 @@ pub async fn item_exists(state: &mut AppState, market_hash_name: &str) -> Result
     }
 }
 
-pub async fn get_price_object(
-    state: &mut AppState,
-    market_hash_name: &str,
-) -> Result<Option<String>> {
+pub async fn get_item_prices(state: &mut AppState, market_hash_name: &str) -> Result<Prices> {
+    let prices = get_price_object(state, market_hash_name)
+        .await?
+        .ok_or(Error::PricesFetchFail)?;
+
+    let mut prices_value: Value =
+        serde_json::from_str(&prices).map_err(|_| Error::PricesParseFail)?;
+
+    let prices = prices_value
+        .get_mut(0)
+        .ok_or(Error::PricesFetchFail)?
+        .take();
+
+    serde_json::from_value(prices).map_err(|_| Error::PricesParseFail)
+}
+
+async fn get_price_object(state: &mut AppState, market_hash_name: &str) -> Result<Option<String>> {
     let cached_prices: Option<String> = state
         .redis
         .json_get("csgotrader_prices", format!("$[\"{}\"]", market_hash_name))
@@ -169,8 +191,8 @@ async fn get_item_object(
     let key = format!("cs_{item_type}");
     let mut path = format!("$.[?@.name==\"{market_hash_name}\"]");
 
-    if item_type == "skins" {
-        match market_hash_name.rfind("(") {
+    match item_type {
+        "skins" | "graffiti" => match market_hash_name.rfind("(") {
             Some(pos) => {
                 path = format!(
                     "$.[?@.name==\"{}\"]",
@@ -180,7 +202,22 @@ async fn get_item_object(
                 );
             }
             _ => (),
+        },
+        "music_kits" => {
+            path = format!(
+                "$.[?@.name==\"{}\"]",
+                &market_hash_name.replace("StatTrak™ ", "")
+            );
         }
+
+        _ => (),
+    };
+
+    if item_type == "music_kits" {
+        path = format!(
+            "$.[?@.name==\"{}\"]",
+            &market_hash_name.replace("StatTrak™ ", "")
+        );
     }
 
     let items: Option<String> = redis.json_get(&key, ".").map_err(|_| Error::RedisGetFail)?;
