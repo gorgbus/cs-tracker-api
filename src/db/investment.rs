@@ -24,13 +24,19 @@ pub enum Currencies {
     USD,
     EUR,
     CNY,
+    TRY,
+    PLN,
+    GBP,
+    UAH,
+    KRW,
+    BRL,
 }
 
 #[derive(Debug, FromRow, Serialize, Deserialize, Clone)]
 pub struct CustomInvestment {
     inv_id: i32,
     steam_id: String,
-    item: String,
+    pub item: String,
     collection: i32,
     col_name: String,
     cost: Decimal,
@@ -81,10 +87,7 @@ pub async fn get_investment(pool: &PgPool, inv_id: i32) -> Result<CustomInvestme
         .bind(inv_id)
         .fetch_one(pool)
         .await
-        .map_err(|e| {
-            println!("{e}");
-            Error::PgFetchFail
-        })?;
+        .map_err(|_| Error::PgFetchFail)?;
 
     invest.cost.rescale(2);
 

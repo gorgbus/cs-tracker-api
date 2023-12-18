@@ -1,8 +1,10 @@
 use axum::{
     extract::{Path, Query, State},
+    response::IntoResponse,
     routing::{delete, get, post},
     Extension, Json, Router,
 };
+use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -11,12 +13,14 @@ use crate::{
             create_investment, drop_investment, get_investments, get_investments_by_coll,
             update_investment, Currencies, CustomInvestment,
         },
-        item::{item_exists, suggest_items, Item},
+        item::{get_item_prices, item_exists, suggest_items, Item},
     },
     error::{Error, Result},
     jwt::User,
     state::AppState,
 };
+
+use super::Prices;
 
 pub mod collection;
 
@@ -65,7 +69,13 @@ async fn new_investment(
 
 #[derive(Serialize)]
 struct Investments {
-    investments: Vec<CustomInvestment>,
+    investments: Vec<PricedInvestment>,
+}
+
+#[derive(Serialize)]
+struct PricedInvestment {
+    investment: CustomInvestment,
+    prices: Prices,
 }
 
 #[derive(Deserialize)]
@@ -75,15 +85,31 @@ struct InvestmentQuery {
 
 async fn all_investments(
     Query(query): Query<InvestmentQuery>,
-    State(state): State<AppState>,
+    State(mut state): State<AppState>,
     Extension(user): Extension<User>,
-) -> Result<Json<Investments>> {
+) -> Result<impl IntoResponse> {
     let investments = match query.col_id {
         Some(col_id) => get_investments_by_coll(&state.pg, user.steam_id()?, col_id).await?,
         _ => get_investments(&state.pg, user.steam_id()?).await?,
     };
 
-    Ok(Json(Investments { investments }))
+    let mut priced_investments = vec![];
+
+    for investment in investments.into_iter() {
+        priced_investments.push(PricedInvestment {
+            prices: get_item_prices(&mut state, &investment.item).await?,
+            investment,
+        });
+    }
+
+    let mut headers = HeaderMap::new();
+
+    // headers.insert("Cache-Control", "public, max-age=");
+
+    Ok((Json(Investments {
+        investments: priced_investments,
+    }))
+    .into_response())
 }
 
 async fn delete_investment(

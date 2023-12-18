@@ -6,10 +6,11 @@ use std::env;
 use axum::{
     extract::{Path, Query, State},
     middleware,
-    response::Redirect,
-    routing::get,
+    response::{IntoResponse, Redirect},
+    routing::{get, post},
     Extension, Json, Router,
 };
+use http::HeaderMap;
 use redis::{Commands, JsonCommands};
 use serde::{Deserialize, Serialize};
 
@@ -23,8 +24,9 @@ use crate::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/inventory", get(get_inventory))
-        .route("/prices", get(get_prices))
+        // .route("/inventory", get(get_inventory))
+        .route("/inventory/price-check", post(price_check))
+        // .route("/prices", get(get_prices))
         .route("/currencies", get(get_currencies))
         .route("/icon/:market_hash_name", get(get_icon))
         .nest("/investment", investment::routes())
@@ -47,13 +49,14 @@ struct Description {
 #[derive(Serialize, Deserialize, Debug)]
 struct CustomInventory {
     items: Vec<InventoryItem>,
-    total_inventory_count: usize,
+    total_inventory_count: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct InventoryItem {
     market_hash_name: String,
     prices: Prices,
+    count: u32,
 }
 
 async fn get_inventory(
@@ -101,11 +104,12 @@ async fn get_inventory(
             new_items.push(InventoryItem {
                 prices: get_item_prices(&mut state, &item.market_hash_name).await?,
                 market_hash_name: item.market_hash_name,
+                count: 1,
             });
         }
 
         let custom_inventory = CustomInventory {
-            total_inventory_count: new_items.iter().count(),
+            total_inventory_count: 0,
             items: new_items,
         };
 
@@ -179,6 +183,12 @@ async fn get_prices(
 struct CurrencyRates {
     EUR: f32,
     CNY: f32,
+    TRY: f32,
+    PLN: f32,
+    GBP: f32,
+    UAH: f32,
+    KRW: f32,
+    BRL: f32,
 }
 
 async fn get_currencies(State(mut state): State<AppState>) -> Result<Json<CurrencyRates>> {
@@ -230,4 +240,42 @@ async fn get_icon(
         .ok_or(Error::ItemMissingImage)?;
 
     Ok(Redirect::to(&icon_url))
+}
+
+#[derive(Deserialize, Debug)]
+struct Item {
+    #[serde(rename = "markethashname")]
+    market_hash_name: String,
+    count: u32,
+}
+
+#[derive(Deserialize, Debug)]
+struct InventoryItems {
+    items: Vec<Item>,
+}
+
+async fn price_check(
+    State(mut state): State<AppState>,
+    Json(body): Json<InventoryItems>,
+) -> Result<impl IntoResponse> {
+    let mut new_items = vec![];
+
+    for item in body.items.into_iter() {
+        new_items.push(InventoryItem {
+            prices: get_item_prices(&mut state, &item.market_hash_name).await?,
+            market_hash_name: item.market_hash_name,
+            count: item.count,
+        });
+    }
+
+    let custom_inventory = CustomInventory {
+        total_inventory_count: new_items.iter().map(|i| i.count).sum(),
+        items: new_items,
+    };
+
+    let mut headers = HeaderMap::new();
+
+    headers.insert("Cache-Control", "public, max-age=1800".parse().unwrap());
+
+    Ok((headers, Json(custom_inventory)).into_response())
 }
